@@ -1,0 +1,21 @@
+The analysis contains two parts: A set of bash scripts driving CDO commands and jupyter notebooks
+
+The CDO commands are organized using bash scripts, and are submitted to a compute node by submit_analysis.sh. The do the following:
+  - concatenate NetCDF files: analysis_CDO/merge.sh and analysis_CDO/merge_3D.sh 
+  - domain-mean timeseries: analysis_CDO/compute_fldmean.sh 
+  - condidtional timeseries: analysis_CDO/compute_fldmean_lnd.sh
+  - Ensmeble mean for the last 50 days: analysis_CDO/compute_ensmean.sh -> 3D fields
+  - Precipitation statistics: analysis_CDO/precip_stats.sh
+
+    Some of the fields were plotted using NCL: Fig. 1 and Fig 2 (plot_NCL)
+
+The more complex analysis and the plots were done in Python using Jupyter notebooks:
+
+  - analysis_jptr/Diurnal_Cycles.ipynb: Fig. 2
+  - analysis_jptr/T500_and_profiles.ipynb: Fig 5, Fig 6
+  - analysis_jptr/wet-day_frequency_wet_dry.ipynb: Tab 2
+  - analysis_jptr/LCL_Bolton.ipynb: Fig. 7, Tab. 3
+  - analysis_jptr/LCL_stats_ALL_SMALL.ipynb: Fig 8, SI Fig. 4 
+  - analysis_jptr/Dependence_on_island_size.ipynb; SI Fig. 2, SI FIg. 3
+
+    Note that the nomenclature of the experiments is different: ALL -> 10LAND, SMALL -> 5LAND
