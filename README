@@ -1,4 +1,8 @@
-The analysis contains two parts: A set of bash scripts driving CDO commands and jupyter notebooks
+
+
+
+
+The analysis contains two parts: A set of bash scripts driving CDO 1.9.5 commands and jupyter notebooks
 
 The CDO commands are organized using bash scripts, and are submitted to a compute node by submit_analysis.sh. The do the following:
   - concatenate NetCDF files: analysis_CDO/merge.sh and analysis_CDO/merge_3D.sh 
@@ -7,9 +11,11 @@ The CDO commands are organized using bash scripts, and are submitted to a comput
   - Ensmeble mean for the last 50 days: analysis_CDO/compute_ensmean.sh -> 3D fields
   - Precipitation statistics: analysis_CDO/precip_stats.sh
 
-    Some of the fields were plotted using NCL: Fig. 1 and Fig 2 (plot_NCL)
+    Some of the fields were plotted using NCL 6.4: Fig. 1 and Fig 2 (plot_NCL)
 
-The more complex analysis and the plots were done in Python using Jupyter notebooks:
+The more complex analysis and the plots were done in Python 3.6.5.7 using Jupyter notebooks:
+  - The employed Python packages include:
+    matplotlib v. 3.1.1, xarray v. 0.12.2, numpy 1.15.1, skimage 0.15.0, scipy v. 1.1.0
 
   - analysis_jptr/Diurnal_Cycles.ipynb: Fig. 2
   - analysis_jptr/T500_and_profiles.ipynb: Fig 5, Fig 6
