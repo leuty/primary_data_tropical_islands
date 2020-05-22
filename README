@@ -1,6 +1,24 @@
+The repo contains the primary data used in Leutwyler and Hohenegger 2020, QJ.
 
 
+CODE
+===
 
+For the particular version of COSMO, we would like to thank the Federal Office of Meteorology and Climatology MeteoSwiss, the Centre for Climate Systems Modeling (C2SM) and ETH Zurich. In particular, we would like to acknowledge Linda Schlemmer for providing us with an initial set of code modifications for using COSMO in an RCE configuration. COSMO may be used for operational and for research applications by the members of the COSMO consortium. Moreover, within a license agreement, the COSMO model may be used for operational and research applications by other national (hydro-)meteorological services, universities, and research institutes. The particular version of the COSMO model used in this study is based on the official version 5.0 with many additions to enable GPU capability. It is available under a license (\url{http://www.cosmo-model.org/content/consortium/licencing.htm}.
+
+The modifications to COSMO in RCE following Wing et al (2017) are listed in: rce_diff.diff
+
+SIMULATIONS
+==========
+
+config: The configutation as run for 10LAND ensmble 0 (as an example). To generate the other ensemble members the value for iseed_noise_t in INPUT_IDEAL was changed.
+
+FR_LAND: The employed land masks
+profiles: The initial conditions for the atmosphere
+
+
+ANALYSIS
+========
 
 The analysis contains two parts: A set of bash scripts driving CDO 1.9.5 commands and jupyter notebooks
 

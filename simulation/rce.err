@@ -1,0 +1,36 @@
+ModuleCmd_Load.c(244):ERROR:105: Unable to locate a modulefile for 'grib_api/1.13.1-CrayCCE-19.10'
+Currently Loaded Modulefiles:
+  1) modules/3.2.11.3(default)
+  2) cray-mpich/7.7.10(default)
+  3) slurm/19.05.3-2
+  4) xalt/2.7.10
+  5) daint-gpu
+  6) gcc/8.3.0(default)
+  7) craype-haswell
+  8) craype-network-aries
+  9) craype/2.6.1(default)
+ 10) cray-libsci/19.06.1(default)
+ 11) udreg/2.3.2-7.0.1.1_3.9__g8175d3d.ari
+ 12) ugni/6.0.14.0-7.0.1.1_7.10__ge78e5b0.ari
+ 13) pmi/5.0.14(default)
+ 14) dmapp/7.1.1-7.0.1.1_4.8__g38cf134.ari
+ 15) gni-headers/5.0.12.0-7.0.1.1_6.7__g3b1768f.ari
+ 16) xpmem/2.2.19-7.0.1.1_3.7__gdcf436c.ari
+ 17) job/2.2.4-7.0.1.1_3.8__g36b56f4.ari
+ 18) dvs/2.12_2.2.151-7.0.1.1_5.6__g7eb5e703
+ 19) alps/6.6.56-7.0.1.1_4.10__g2e60a7e4.ari
+ 20) rca/2.2.20-7.0.1.1_4.9__g8e3fb5b.ari
+ 21) atp/2.1.3(default)
+ 22) perftools-base/7.1.1(default)
+ 23) PrgEnv-gnu/6.0.5
+ 24) cdt/19.10
+ 25) CrayGNU/.19.10
+ 26) cray-netcdf/4.6.3.1(default)
+ 27) cray-hdf5/1.10.5.1(default)
+ 28) expat/.2.2.5
+ 29) UDUNITS/.2.2.26
+ 30) zlib/.1.2.11
+ 31) libpng/.1.6.34
+ 32) ncview/2.1.7-CrayGNU-19.10
+ 33) cudatoolkit/10.0.130_3.22-7.0.1.0_5.2__gdfb4ce5
+/bin/rm: cannot remove 'YU*': No such file or directory

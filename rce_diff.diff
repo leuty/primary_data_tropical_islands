@@ -1,0 +1,1567 @@
+diff --git a/cosmo/src/data_runcontrol.f90 b/cosmo/src/data_runcontrol.f90
+index 09ecb2dd..486741cd 100644
+--- a/cosmo/src/data_runcontrol.f90
++++ b/cosmo/src/data_runcontrol.f90
+@@ -440,11 +440,14 @@ IMPLICIT NONE
+                     ! for turbulent diffusion (only if itype_turb=3)
+     lcpfluc,      & ! consideration of fluctuations of the heat capacity of air
+     lco2_stab,    & ! enable CO2 stabilisation
+-    lradtopo        ! if .TRUE., calculate topographic correction of radiation
++    lradtopo,     & ! if .TRUE., calculate topographic correction of radiation
++    lradcst         ! if .TRUE., radiation is determined by radlon, radlat
+ 
+   REAL (KIND=wp)     ::           &
+     hincrad,      & ! increment for running the radiation in hours
+     hnextrad,     & ! next step for running the radiation in hours
++    radlon,       & ! geographic longitude used in radiation code
++    radlat,       & ! geographic latitude used in radiation code
+     czbot_w_so      ! depth of bottom of last hydrological active soil layer [m]
+ 
+ ! 4. controlling the dynamics
+diff --git a/cosmo/src/data_turbulence.f90 b/cosmo/src/data_turbulence.f90
+index e2690656..ac72c83b 100644
+--- a/cosmo/src/data_turbulence.f90
++++ b/cosmo/src/data_turbulence.f90
+@@ -117,7 +117,7 @@ REAL (KIND=wp)     ::         &
+                                 ! (should be dependent on location)
+   len_min    =  1.0E-6_wp,& ! minimal turbulent length scale [m]
+ 
+-  vel_min    =  0.01_wp,  & ! minimal velocity scale [m/s]
++  vel_min    =  1.0_wp,  & ! minimal velocity scale [m/s]
+ 
+   akt        =  0.4_wp,   & ! von Karman-constant
+ 
+diff --git a/cosmo/src/lmorg.f90 b/cosmo/src/lmorg.f90
+index 537f8bd1..660ffc0f 100644
+--- a/cosmo/src/lmorg.f90
++++ b/cosmo/src/lmorg.f90
+@@ -1040,7 +1040,9 @@ comp_pe: IF (lcompute_pe) THEN
+   ! to specify more than one disturbance (up to 50 right now).
+   
+   IF (lartif_data) THEN
++    !$acc update host(t(:,:,:,nnew), qv_new(:,:,:))
+     CALL set_tempdist(nnew)
++    !$acc update device(t(:,:,:,nnew), qv_new(:,:,:))
+ 
+     ! Copy the modified fields T and QV into timelevel nnow for leapfrog integration:
+     IF (.NOT. l2tls) THEN
+@@ -1311,7 +1313,7 @@ comp_pe: IF (lcompute_pe) THEN
+     IF (lartif_data) THEN
+ #ifdef _OPENACC
+       yzerrmsg='lartif_data and OpenACC not suported'
+-      CALL model_abort (my_cart_id, 621992, yzerrmsg, 'lmorg')
++!      CALL model_abort (my_cart_id, 621992, yzerrmsg, 'lmorg')
+ #endif
+       ! Set possible artificial heating rate disturbance(s) in the soil 
+       ! (affects t_so or t_s/t_m/t_cl depending on soil model
+@@ -3182,11 +3184,11 @@ LOGICAL :: lfound, l_all_t_snow_bd_def
+ ! Set one or more heating rate disturbances (up to 50). Time(s), location(s) and intensity(ies) are
+ ! determined by namelist parameters of namelist IDEAL
+   IF (lartif_data) THEN
+-#ifdef _OPENACC
++!#ifdef _OPENACC
+     izerror  = 4240
+     yzerrmsg = 'lartif_data not ported with OpenACC at the moment'
+-    CALL model_abort(my_cart_id, izerror, yzerrmsg, yzroutine)
+-#else
++    !CALL model_abort(my_cart_id, izerror, yzerrmsg, yzroutine)
++!#else
+     ! Set possible heating rate disturbance(s) in the atmosphere (affects ttens and qtens):
+     CALL artif_heatrate_dist(nnow)
+     ! Set possible disturbance(s) in the bottom boundary condition for t_s (takes effect if lsoil=.false.):
+@@ -3199,8 +3201,10 @@ LOGICAL :: lfound, l_all_t_snow_bd_def
+       t_snow(:,:,nx0) = t_snow(:,: ,nnow)
+     END IF
+     ! Add white noise to the T and W - fields:
++    !$acc update host(w(:,:,:,nnow), t(:,:,:,nnow))
+     CALL  add_noise_tw(nnow)
+-#endif
++    !$acc update device(w(:,:,:,nnow), t(:,:,:,nnow))
++!#endif
+   END IF
+ 
+ !-------------------------------------------------------------------------------
+@@ -3310,8 +3314,7 @@ INTEGER, SAVE :: iexchg = -1
+     CALL gcl_AddFieldToHaloExchange( iexchg, nbl_exchg, jstartpar, jendpar, qrs(:,:,:), "qrs" )
+     IF (lconv) THEN
+       CALL gcl_AddFieldToHaloExchange( iexchg, nbl_exchg, jstartpar, jendpar, dqvdt(:,:,:), "dqvdt" )
+-      CALL gcl_RegisterField( qvsflx, "qvsflx" )
+-      CALL gcl_AddNonDycoreFieldToHaloExchange( iexchg, nbl_exchg, jstartpar, jendpar, qvsflx(:,:), "qvsflx" )
++      CALL gcl_AddFieldToHaloExchange( iexchg, nbl_exchg, jstartpar, jendpar, qvsflx(:,:), "qvsflx" )
+     ENDIF
+     DO iztrcr = 1, trcr_get_ntrcr()
+ 
+@@ -3417,8 +3420,7 @@ INTEGER, SAVE :: iexchg = -1
+     CALL gcl_AddFieldToHaloExchange( iexchg, nbl_exchg, jstartpar, jendpar, qrs(:,:,:), "qrs" )
+     IF (lconv) THEN
+       CALL gcl_AddFieldToHaloExchange( iexchg, nbl_exchg, jstartpar, jendpar, dqvdt(:,:,:), "dqvdt" )
+-      CALL gcl_RegisterField( qvsflx, "qvsflx" )
+-      CALL gcl_AddNonDycoreFieldToHaloExchange( iexchg, nbl_exchg, jstartpar, jendpar, qvsflx(:,:), "qvsflx" )
++      CALL gcl_AddFieldToHaloExchange( iexchg, nbl_exchg, jstartpar, jendpar, qvsflx(:,:), "qvsflx" )
+     ENDIF
+     IF (lprog_tke) THEN
+       CALL gcl_RegisterField( tke(:,:,:,nnow), "tke_now" )
+diff --git a/cosmo/src/organize_physics.f90 b/cosmo/src/organize_physics.f90
+index 0729b7a3..a0b0d295 100644
+--- a/cosmo/src/organize_physics.f90
++++ b/cosmo/src/organize_physics.f90
+@@ -236,6 +236,7 @@ USE data_runcontrol,    ONLY:                                                &
+        ico2_rad, ibot_w_so, czbot_w_so, l3dturb_metr, idbg_level,            &
+        lprintdeb_all, lradtopo, nhori, hstart, lsso, nincsso,                &
+        itype_sher, limpltkediff, ltkesso, ltkecon, lmulti_snow, lemiss,      &
++       lradcst, radlon, radlat,                                              &
+        lstomata, itype_aerosol, itype_root, itype_heatcond, itype_hydbound,  &
+        itype_hydcond, itype_hydmod, lsoil_init_fill,                         &
+        l_dzeta_d_needed, lperi_x, lperi_y, l2dim, nbl_exchg,  &
+@@ -262,7 +263,8 @@ USE data_fields,        ONLY:                                                &
+        !other fields used in the physics
+        llandmask, rlandmask, u_m, v_m, u, v,                                 &
+        ! FLake - lake parametrization
+-       depth_lk, t_snow_mult, t_snow
++       depth_lk, t_snow_mult, t_snow,                                        &
++       sobs, thbs, lhfl_s, shfl_s
+        
+ 
+ USE data_io,            ONLY:  ydate_ini, lbdclim, lana_qi, llb_qi, lana_qg, &
+@@ -312,7 +314,7 @@ USE sso_interface,      ONLY:  sso_init_copy, sso_organize, ssoCopyList,      &
+                                sso_init, sso_finalize
+ USE src_seaice,         ONLY:  seaice
+ USE src_artifdata,      ONLY:  tkvhfix, tkhhfix, tkvmfix, tkhmfix, &
+-                               lnosurffluxes_m, lnosurffluxes_h
++                               lnosurffluxes_m, lnosurffluxes_h, lmlo, t_mlo
+ 
+ USE src_tracer,         ONLY: trcr_new, trcr_errorstr, trcr_meta_define,      &
+                               trcr_meta_set, trcr_get
+@@ -571,7 +573,7 @@ ELSEIF (yaction == 'tracer') THEN
+     IF (llb_qi) THEN
+       izlbc_qi = T_LBC_FILE
+     ELSE
+-      izlbc_qi = T_LBC_ZERO     ! this might be changed by the user 
++      izlbc_qi = T_LBC_ZEROGRAD ! this might be changed by the user 
+                                 ! to T_LBC_CST or T_LBC_ZEROGRAD
+     ENDIF
+ 
+@@ -2377,6 +2379,20 @@ ELSEIF (yaction == 'compute') THEN
+ 
+ #endif
+ 
++  !----------------------------------------------------------------------------
++  ! Section 3.5a: Mixed-layer ocean model
++  !----------------------------------------------------------------------------
++
++  IF (lmlo) THEN
++     IF (izdebug > 5) THEN
++        PRINT *, '      MIXED-LAYER MODEL'
++     ENDIF
++    !$acc update host(t_s(:,:,nnew),t_g(:,:,nnew),shfl_s,lhfl_s,sobs,thbs)
++     CALL t_mlo
++    !$acc update device(t_s(:,:,nnew),t_g(:,:,nnew))
++  ENDIF
++
++
+   !----------------------------------------------------------------------------
+   ! Section 3.8: Boundary exchange for the parallel program
+   !----------------------------------------------------------------------------
+@@ -2994,6 +3010,8 @@ SUBROUTINE input_phyctl (nuspecif, nuin, ierrstat)
+ ! Variables for default values
+   REAL (KIND=wp)             ::       &
+     hincrad_d,    & ! hour increment for running the radiation
++    radlon_d,     & ! geographic longitude for the radiation
++    radlat_d,     & ! geographic latitude for the rediation
+     czbot_w_so_d, & ! depth of bottom of last hydrological active soil layer
+     czml_soil_d(20), & ! depth of the main level of the soil layers (defaults)
+     czml_soil  (20)    ! depth of the main level of the soil layers (read in)
+@@ -3092,7 +3110,8 @@ SUBROUTINE input_phyctl (nuspecif, nuin, ierrstat)
+     lctke_d,      & ! convection with turbulent convective energy closure
+                     ! warning: lctke not yet fully implemented
+     lradtopo_d,   & ! uses topographic correction of radiation
+-    lco2_stab_d     ! a  year for CO2 stabilisation will be defined
++    lco2_stab_d,  & ! a  year for CO2 stabilisation will be defined
++    lradcst_d       ! use fixed geographic location for the radiation calculation
+ 
+   INTEGER (KIND=iintegers)   :: i, k, invar, ierr, iz_err
+   LOGICAL                    :: lzequiv
+@@ -3110,6 +3129,7 @@ SUBROUTINE input_phyctl (nuspecif, nuin, ierrstat)
+                     lforest, lconv_inst, lseaice, llake, ico2_rad, czbot_w_so,&
+                     l3dturb_metr, nradcoarse, lradf_avg, lradtopo, nhori,     &
+                     lsso, nincsso, limpltkediff, ltkesso, ltkecon,            &
++                    lradcst, radlon, radlat,                                  &
+                     itype_sher, lmulti_snow, ke_snow, lemiss, lstomata,       &
+                     itype_aerosol, itype_root, itype_heatcond, itype_hydbound,&
+                     itype_hydcond, itype_hydmod, lco2_stab, iy_co2_stab,      &
+@@ -3169,7 +3189,10 @@ IF (my_world_id == 0) THEN
+   lctke_d        = .FALSE.
+   lradtopo_d     = .FALSE.
+   lco2_stab_d    = .FALSE.
++  lradcst_d      = .FALSE.
+ 
++  radlon_d      = 0.0_wp
++  radlat_d      = 36.0_wp
+   nhori_d      = 24
+   nradcoarse_d = 1
+   nincrad_d    = 0
+@@ -3267,6 +3290,7 @@ IF (my_world_id == 0) THEN
+   lctke          = lctke_d  
+   lradtopo       = lradtopo_d
+   lco2_stab      = lco2_stab_d !HJP 2011-12-19
++  lradcst        = lradcst_d
+ 
+   nhori          = nhori_d
+   nradcoarse     = nradcoarse_d
+@@ -3310,6 +3334,8 @@ IF (my_world_id == 0) THEN
+   ke_snow        = ke_snow_d
+   czml_soil(:)   = -1.0_wp
+   czbot_w_so     = czbot_w_so_d
++  radlon         = radlon_d
++  radlat         = radlat_d
+   nlgw           = nlgw_d
+ 
+   itype_albedo   = itype_albedo_d
+@@ -3822,23 +3848,26 @@ IF (nproc > 1) THEN
+     logbuf (35) = l_2mom
+     logbuf (36) = lconv_clo
+     logbuf (37) = lsoil_init_fill
++    logbuf (38) = lradcst
+ 
+     realbuf( 1) = czbot_w_so
+     realbuf( 2) = hincrad
+     realbuf( 3) = hnextrad
++    realbuf( 4) = radlon
++    realbuf( 5) = radlat
+ 
+     IF (lmulti_layer) THEN
+       DO i = 1, ke_soil+1
+-        realbuf(3+i) = czmls(i)
++        realbuf(5+i) = czmls(i)
+       ENDDO
+     ELSE
+-      realbuf( 4:40) = 0.0_wp
++      realbuf( 5:40) = 0.0_wp
+     ENDIF
+     
+   ENDIF
+ 
+   CALL distribute_values (intbuf, 34, 0, imp_integers, icomm_world, ierr)
+-  CALL distribute_values (logbuf, 37, 0, imp_logical,  icomm_world, ierr)
++  CALL distribute_values (logbuf, 38, 0, imp_logical,  icomm_world, ierr)
+   CALL distribute_values (realbuf,40, 0, imp_reals,    icomm_world, ierr)
+ 
+   IF (my_world_id /= 0) THEN
+@@ -3921,10 +3950,13 @@ IF (nproc > 1) THEN
+     l_2mom       = logbuf (35)
+     lconv_clo    = logbuf (36)
+     lsoil_init_fill = logbuf (37)
++    lradcst      = logbuf (38)
+ 
+     czbot_w_so   = realbuf( 1)
+     hincrad      = realbuf( 2)
+     hnextrad     = realbuf( 3)
++    radlon       = realbuf( 4)
++    radlat       = realbuf( 5)
+ 
+     IF (lmulti_layer) THEN
+       ALLOCATE (czmls(1:ke_soil+1), STAT=ierr)
+@@ -3935,7 +3967,7 @@ IF (nproc > 1) THEN
+       msoilgrib(0) = 0_iintegers
+       czhls    (0) = 0.0_wp
+       DO i = 1, ke_soil+1
+-        czmls(i) = realbuf(3+i)
++        czmls(i) = realbuf(5+i)
+         czhls(i) = 2.0_wp * czmls(i) - czhls(i-1)
+         msoilgrib(i) = NINT (100 * czmls(i)+1.0E-7_wp)
+       ENDDO
+@@ -4129,6 +4161,12 @@ IF (my_world_id == 0) THEN
+                                         'nlgw    ',nlgw    ,nlgw_d,    ' I '
+   WRITE (nuspecif, '(T8,A,T21,L12  ,T40,L12  ,T59,A3)')                      &
+                                       'lradtopo',lradtopo,lradtopo_d  ,' L '
++  WRITE (nuspecif, '(T8,A,T21,L12  ,T40,L12  ,T59,A3)')                      &
++                                      'lradcst',lradcst,lradcst_d  ,' L '
++  WRITE (nuspecif, '(T8,A,T21,F12.4,T40,F12.4,T59,A3)')                      &
++                                  'radlon',radlon,radlon_d,' R '
++  WRITE (nuspecif, '(T8,A,T21,F12.4,T40,F12.4,T59,A3)')                      &
++                                  'radlat',radlat,radlat,' R '
+   WRITE (nuspecif, '(T8,A,T21,I12  ,T40,I12  ,T59,A3)')                      &
+                                         'nhori', nhori, nhori_d,       ' I '
+   WRITE (nuspecif, '(T8,A,T21,I12  ,T40,I12  ,T59,A3)')                      &
+diff --git a/cosmo/src/radiation_interface.f90 b/cosmo/src/radiation_interface.f90
+index 6923d93c..4989de9f 100644
+--- a/cosmo/src/radiation_interface.f90
++++ b/cosmo/src/radiation_interface.f90
+@@ -350,6 +350,9 @@ USE data_runcontrol , ONLY :   &
+     lforest,      & ! if .true., run with forest (evergreen and deciduous)
+     nhori,        & ! number of sectors for the horizont array by the topographic
+                     ! correction of the radiation
++    lradcst,      & ! fixed geographic location in radiation 
++    radlon,       & ! geographic longitude (deg)
++    radlat,       & ! geographic latitude (deg)
+ 
+     ! and for the Climate-LM Version
+ !#    ico2_rad,     & ! type of CO2 concentration in radiation parameterization
+@@ -560,6 +563,8 @@ USE radiation_rg_org, ONLY: radiation_rg_org_wkarr_alloc, &
+ USE radiation_rg,     ONLY: radiation_rg_wkarr_alloc, &
+                             radiation_rg_wkarr_dealloc
+ 
++USE src_artifdata,            ONLY:  lrce, ldayc
++
+ !------------------------------------------------------------------------------
+ 
+ IMPLICIT NONE
+@@ -826,6 +831,13 @@ SUBROUTINE radiation_init
+       CALL model_abort(my_cart_id, 666, yerrmsg, 'radiation_init')
+   ENDIF
+ 
++!  set constant values for latitude and longitude
++
++  IF (lradcst.or.lrce) THEN
++    rlat = radlat*pi/180.0_wp
++    rlon = radlon*pi/180.0_wp
++  ENDIF
++
+ !------------------------------------------------------------------------------
+ ! Section 1: Compute the start- and end-indices
+ !------------------------------------------------------------------------------
+@@ -933,7 +945,7 @@ IF (itype_aerosol == 1) THEN
+      ! Calculation of the values zalp for the sine of latitude (zsinphi) of the
+      ! normalized Legendre associated functions. The limit wave number is 10.
+ 
+-     IF ((.NOT. lscm) .AND. lperi_x) THEN
++     IF ((.NOT. lscm) .AND. lperi_x.AND.(.NOT.lradcst)) THEN
+        ! In case of periodic BCs, set a constant reference
+        ! point for the aerosol distribution to make it equal everywhere
+        ! in the domain. This reference point is chosen to be the reference point
+@@ -1128,6 +1140,19 @@ IF (itype_aerosol == 2) THEN
+   zaef(:,:) = 0.0_dp
+ ENDIF ! itype_aerosol = 2
+ 
++IF (lrce) THEN
++  IF (itype_aerosol == 1) THEN
++    DO j = 1, je
++      DO  i = 1, ie
++        aersea(i,j) = 0.0_wp
++        aerlan(i,j) = 0.0_wp
++        aerurb(i,j) = 0.0_wp
++        aerdes(i,j) = 0.0_wp
++      ENDDO
++    ENDDO
++  ENDIF
++ENDIF
++
+ !------------------------------------------------------------------------------
+ ! Section 3: Data for radiative transfer calculations
+ !------------------------------------------------------------------------------
+@@ -1593,6 +1618,9 @@ SUBROUTINE compute_sunshine_conditions(         &
+   zsct_h            = 0.0_wp
+   zmaxmu0           = 0.0_wp
+ 
++  IF (lrce .AND. .NOT. ldayc) solc = 551.58_wp
++
++
+   !$acc parallel
+   !$acc loop gang
+   DO j=1,je
+@@ -1609,8 +1637,22 @@ SUBROUTINE compute_sunshine_conditions(         &
+     nzrad = jmu0
+     !without l_zenith_update, use old formulation
+     IF (.NOT.l_zenith_update) nzrad   = ntstep + nincrad/2-1
+-    CALL get_utc_date ( nzrad, ydate_ini, dt, itype_calendar, yrad1, yrad2,  &
+-      itaja, zstunde )
++    IF (lradcst.or.lrce) THEN
++       IF (.NOT. ldayc) THEN
++         ! year (jj) and day of the year (itaja) remain constant
++         CALL get_utc_date ( 0, ydate_ini, dt, itype_calendar, yrad1, yrad2,  &
++              itaja, zstunde )
++       ELSE
++         ! year (jj) and day of the year (itaja) remain constant
++         ! DL_2019
++         CALL get_utc_date ( MOD(nzrad, 24_iintegers  * 3600_iintegers / INT(dt)), &
++              ydate_ini, dt, itype_calendar, yrad1, yrad2,  &
++              itaja, zstunde )
++       END IF
++    ELSE
++       CALL get_utc_date ( nzrad, ydate_ini, dt, itype_calendar, yrad1, yrad2,  &
++            itaja, zstunde )
++    ENDIF
+     READ (yrad1(1:4),'(I4)') jj
+ 
+     IF (itaja /= itaja_zsct_previous) THEN ! new calendar day
+@@ -1791,6 +1833,19 @@ SUBROUTINE compute_sunshine_conditions(         &
+     !$acc end parallel
+   ENDIF
+ #endif
++    IF (lrce) THEN
++      !$acc parallel
++      !$acc loop gang
++      DO  j = jsc, jec
++        !$acc loop vector
++        DO  i = isc, iec
++          zsmu0(i,j) = 0.7425940027_wp !Following Cronin et al 2015.
++        ENDDO
++      ENDDO
++      !$acc end parallel
++
++      zsct = solc 
++    ENDIF
+ 
+   IF (idbg > 10) THEN
+     PRINT *, '           computation loop over model domain'
+@@ -1923,6 +1978,13 @@ SUBROUTINE radiation_init_copy
+     CALL register_copy( aer_or_b,      radiationCopyList, copyToBlockF )
+     CALL register_copy( aer_bc_b,      radiationCopyList, copyToBlockF )
+     CALL register_copy( aer_ss_b,      radiationCopyList, copyToBlockF )
++    IF (lrce) THEN
++      aer_su_b(:) = 0.0_wp
++      aer_du_b(:) = 0.0_wp
++      aer_or_b(:) = 0.0_wp
++      aer_bc_b(:) = 0.0_wp
++      aer_ss_b(:) = 0.0_wp
++    ENDIF
+   ENDIF
+ 
+   IF (lemiss) THEN
+diff --git a/cosmo/src/radiation_rg_org.f90 b/cosmo/src/radiation_rg_org.f90
+index 54e9e466..a2a5eda3 100644
+--- a/cosmo/src/radiation_rg_org.f90
++++ b/cosmo/src/radiation_rg_org.f90
+@@ -306,6 +306,7 @@ USE data_runcontrol , ONLY :   &
+ !#                    !               .FALSE.:   or with Davies conditions
+ !#    l2dim,        & ! 2 dimensional runs
+ !#    lscm,         & ! SCM-run
++     itype_spubc,   &  ! type of Rayleigh damping in the upper levels
+ 
+ ! 9. Variables for Ascii file handling, time measuring, ...
+ ! ---------------------------------------------------------
+@@ -481,6 +482,7 @@ USE turbulence_utilities, ONLY: cloud_diag_scalar
+ 
+ USE radiation_rg, ONLY : fesft
+ 
++USE src_artifdata,            ONLY:  lrce
+ !------------------------------------------------------------------------------
+ 
+ IMPLICIT NONE
+@@ -838,6 +840,17 @@ SUBROUTINE radiation_rg_organize(                                     &
+      zclwcm = 1.0E-9_wp, & ! avoids cloud water content = 0.0
+      rtod  = 57.2957795_wp ! conversion from radians to degrees
+ 
++  REAL    (KIND=wp   ), PARAMETER ::  &
++
++     zg1     = 3.6478_wp,  & !
++     zg2     = 0.83209_wp, &
++     zg3     = 11.3515_wp
++
++  REAL    (KIND=wp   ) ::  &
++
++     zo3
++
++
+ ! the former parameter zqco2 =  0.5014E-3_wp is now a variable 
+ ! (for specifying different co2 scenarios in the Climate-LM Version).
+ ! It is set later in this subroutine dependent on the setting of the Namelist
+@@ -1470,6 +1483,8 @@ SUBROUTINE radiation_rg_organize(                                     &
+ 
+     END SELECT
+ 
++    IF (lrce) zqco2 = 0.690138136E-3_wp ! 348 ppmv
++
+   !----------------------------------------------------------------------------
+   ! Section 1.1c:  initialize background aerosol (aerdis)
+   !----------------------------------------------------------------------------
+@@ -1875,6 +1890,14 @@ SUBROUTINE radiation_rg_organize(                                     &
+       ENDDO
+       !$acc end parallel
+     ENDIF
++    IF (lrce) THEN
++      !$acc parallel
++      !$acc loop gang vector
++      DO ip = 1, ipend
++        zalso(ip) = 0.07
++      ENDDO
++      !$acc end parallel
++    ENDIF
+ 
+     IF (lradave) THEN
+       !$acc parallel
+@@ -2480,6 +2503,20 @@ SUBROUTINE radiation_rg_organize(                                     &
+       ENDDO
+       !$acc end parallel
+     ENDIF
++    IF (lrce) THEN
++      !$acc parallel
++      !$acc loop seq
++       DO  k = 1, ke
++        !$acc loop gang vector
++         DO ip = 1, ipend
++
++           zo3 = zg1*((0.01*p0(ip,k))**zg2)*exp(-p0(ip,k)/(100.*zg3)) ! ozone contents in ppmv
++           zduo3f(ip,k) = 1e-6*zo3*p0(ip,k)                           ! partial pressure in Pa
++
++         ENDDO
++       ENDDO
++      !$acc end parallel
++    ENDIF
+ 
+     !------------------------------------------------------------------------------
+     ! Section 6:  Correction factors for radiation in complex topography
+@@ -2812,6 +2849,10 @@ SUBROUTINE radiation_rg_organize(                                     &
+         END IF
+         thbs (ip) = zflt_s(ip)
+         thbt (ip) = zflt  (ip, 1)
++        if ( itype_spubc == 3 ) THEN
++          !DL_HACK: Bugfix for spubc_3 boundary. Anomalous pressure at uppermost full level. Use second level
++          thbt (ip) = zflt  (ip, 2)
++        END iF
+ 
+         lwd_s(ip) = zfltd(ip)
+         lwu_s(ip) = zfltu(ip)
+@@ -3151,6 +3192,10 @@ SUBROUTINE radiation_rg_organize(                                     &
+       swdifu_s(ip) = swtrdifu_s (ip)     * sod_t(ip)
+       sobs    (ip) = sotr       (ip,ke+1)* sod_t(ip)
+       sobt    (ip) = sotr       (ip,1)   * sod_t(ip)
++      IF ( itype_spubc == 3 ) THEN
++        !DL_HACK: Bugfix for spubc_3 boundary. Anomalous pressure at uppermost full level. Use second level
++        sobt    (ip) = sotr       (ip,2)   * sod_t(ip)
++      END IF
+       pabs    (ip) = sotr_par   (ip)     * sod_t(ip)
+     ENDIF
+   ENDDO
+diff --git a/cosmo/src/soil_terra_multlay.f90 b/cosmo/src/soil_terra_multlay.f90
+index d32f1bbf..53edef57 100644
+--- a/cosmo/src/soil_terra_multlay.f90
++++ b/cosmo/src/soil_terra_multlay.f90
+@@ -2030,6 +2030,14 @@ LOGICAL :: lloc_timing
+   !XL_timing
+   lloc_timing=.FALSE.
+ 
++  ! This need to be added for the restart otherwise the old states from w_so_ice
++  ! may be replaced by 0.0 values
++  ! Comparison with 0.0 of the SUM may be risky.
++  ! IF (SUM(w_so_ice_new) .EQ. 0.0 .AND. nstart == ntstep .AND. nstart .NE. 0) THEN
++  IF (nstart == ntstep .AND. nstart .NE. 0) THEN
++    w_so_ice_new = w_so_ice_now
++  END IF
++
+ 
+ !------------------------------------------------------------------------------
+ ! Section I.1: Initializations
+@@ -3443,7 +3451,7 @@ ENDDO                   !acc_add
+                 IF(zw_fr(i,kso)+ztrang(i,kso)*zdtdrhw/zdzhs(kso) .lt. zpwp(i)) THEN
+                    ztrang(i,kso) = MIN(0.0_wp,(zpwp(i)-zw_fr(i,kso))*zdzhs(kso)/zdtdrhw)
+                 END IF
+-!                lhfl_pl(i,kso)= lh_v * ztrang(i,kso)
++                lhfl_pl(i,kso)= lh_v * ztrang(i,kso)
+                 ztrangs(i)    = ztrangs(i) + ztrang(i,kso)
+               END IF  ! upwards directed potential evaporation only
+             END IF    ! m_styp > 2
+diff --git a/cosmo/src/src_artifdata.f90 b/cosmo/src/src_artifdata.f90
+index 78bef8d8..1315fc1b 100644
+--- a/cosmo/src/src_artifdata.f90
++++ b/cosmo/src/src_artifdata.f90
+@@ -1,4 +1,4 @@
+-!+ Source module for the setup of the LM
++!+ Source modue for the setup of the LM
+ !------------------------------------------------------------------------------
+ 
+ !!! IF PROBLEMS WITH NAMELISTS OCCUR: COMPILE ON PLATFORMS OTHER THAN NEC,
+@@ -606,7 +606,7 @@ MODULE src_artifdata
+        nbd1,         & ! indices for permutation of the
+        nbd2,         & ! two boundary time levels
+        lartif_data,  & ! forecast with self-defined artificial data
+-       nbl_exchg,    & ! number of boundlines to exchange       
++       !nbl_exchg,    & ! number of boundlines to exchange       
+        lperi_x,        & ! if lartif_data=.TRUE.: periodic boundary conditions (.TRUE.) in x-dir.
+        lperi_y,        & ! if lartif_data=.TRUE.: periodic boundary conditions (.TRUE.) in y-dir.
+        lmetr,        & ! lartif_data=.TRUE.:  with metric terms
+@@ -647,8 +647,9 @@ MODULE src_artifdata
+                        !  three-layer model
+        cdzw23,       & !  thickness of middle soil water layer in 
+                        !  three-layer model 
+-       cdzw33          !  thickness of lower soil water layer in 
++       cdzw33,       & !  thickness of lower soil water layer in 
+                        !  three-layer model
++       chc_w           !  heat capacity of water 
+ 
+ !------------------------------------------------------------------------------
+ 
+@@ -709,6 +710,12 @@ MODULE src_artifdata
+        t          ,    & ! temperature                                   (  k  )
+        pp         ,    & ! deviation from the reference pressure         ( pa  )
+        rho        ,    & ! total density of moist air                    (kg/m3)
++       ! LINDA, b
++       lhfl_s     ,    &
++       shfl_s     ,    &
++       sobs       ,    &
++       thbs       ,    &
++       ! LINDA, e
+ 
+ ! 4. tendency fields for the prognostic variables                     (unit )
+ ! -----------------------------------------------
+@@ -821,8 +828,10 @@ MODULE src_artifdata
+        intbuf, realbuf, charbuf, logbuf, & ! Buffers for distributing the namelists
+        sendbuf,         & ! sending buffer for boundary exchange:
+                                 ! 1-4 are used for sending, 5-8 are used for receiving
++       imp_grib,       & ! determines the REAL type for the GRIB library
+        isendbuflen        ! length of one column of sendbuf
+ 
++
+ !------------------------------------------------------------------------------
+ 
+   USE utilities,                ONLY: sleve_split_oro, uv2uvrot_vec, &
+@@ -844,6 +853,8 @@ MODULE src_artifdata
+                                       k_index_of_pressure_levels, khmax
+ 
+   USE data_io, ONLY: root, ydate_ini, &
++       ndims_id_in,       & ! number of dimensionID's for netCDF formatted input
++       idims_id_in,       & ! for IDs of the dimensions of netCDF formatted input
+        lbdclim            ! boundary data in climate model     ! PIK  (D.Hauffe)
+                           ! (in climate mode also some external parameters have
+                           !  to be updated, which are held constant in forecast
+@@ -852,6 +863,8 @@ MODULE src_artifdata
+   USE data_turbulence, ONLY: &
+        vel_min            ! minimal velocity scale [m/s]
+ 
++  USE io_utilities,    ONLY:  read_netcdf, open_file, close_file 
++
+ !------------------------------------------------------------------------------
+ 
+   USE src_tracer,              ONLY: trcr_get, trcr_new, trcr_errorstr, &
+@@ -873,6 +886,15 @@ MODULE src_artifdata
+   USE m_perturb, ONLY : fld_perturb
+ #endif
+ 
++!DL_2019
++#ifdef NETCDF
++! declare netcdf variables and functions
++USE netcdf,           ONLY :   &
++  nf90_inq_varid,              &
++  NF90_strerror,               &
++  NF90_NOERR
++#endif
++
+ !------------------------------------------------------------------------------
+ 
+   IMPLICIT NONE
+@@ -1095,7 +1117,14 @@ MODULE src_artifdata
+   REAL(KIND=wp)     :: tkhmfix=0.0_wp   ! Constant horiz. diffusion coeff. for momentum [m**2/s]
+   LOGICAL :: lnosurffluxes_m=.FALSE.     ! Switch to turn on free-slip lower BC by setting tcm to 0.0
+   LOGICAL :: lnosurffluxes_h=.FALSE.     ! Switch to turn on no-surface-heat/moisture-flux lower BC by setting tch to 0.0
+-  
++! LINDA, b
++  LOGICAL :: lrce                     ! run radiative-convective equilibrium simulations, constant sw-radiation
++  LOGICAL :: ldayc                    ! run radiative-convective equilibrium simulations with a diurncal cyle of radiation
++  LOGICAL :: lmlo                    ! use mixed-layer ocean
++  REAL(KIND=wp) :: depth_mlo     ! depth of mixed-layer ocean
++  REAL(KIND=wp) :: sst_mlo       ! initial temperature of mixed-layer ocean
++! LINDA, e
++   
+   
+   LOGICAL :: ltempdist(ntempdist_max)   ! Switch(es) (up to 50) to release temperature disturbances
+   CHARACTER(len=lcbuf) :: ctype_tempdist(ntempdist_max)   ! Type of temperature disturbance(s)
+@@ -1209,6 +1238,7 @@ MODULE src_artifdata
+   REAL(KIND=wp)     :: H0_rel_noise   ! Relative level of white noise on surface fluxes for lsensiflux_fix=.true.
+   INTEGER(KIND=iintegers) :: iseed_noise_H0   ! (Optional) Seed for the random number generator for H0-noise, 
+                                               ! if H0_rel_noise >= 1E-5
++  REAL(KIND=wp)     :: oo_c_s_mlo   ! Reverse heat capacity of mixed-layer ocean [m2 * K /J]
+ !!!namelisttag   used by the ed-script ed_addnl.in which automatically adds nlparams
+ 
+ 
+@@ -1439,6 +1469,13 @@ CONTAINS
+     REAL(KIND=wp)     :: tkhmfix_d   ! Constant horiz. diffusion coeff. for momentum [m**2/s]
+     LOGICAL :: lnosurffluxes_m_d   ! Switch to turn on free-slip lower BC by setting tcm to 0.0
+     LOGICAL :: lnosurffluxes_h_d   ! Switch to turn on no-surface-heat/moisture-flux lower BC by setting tch to 0.0
++! LINDA, b
++    LOGICAL :: lrce_d
++    LOGICAL :: ldayc_d
++    LOGICAL :: lmlo_d
++    REAL(KIND=wp) :: depth_mlo_d
++    REAL(KIND=wp) :: sst_mlo_d
++! LINDA, e
+     LOGICAL :: ltempdist_d(ntempdist_max)   ! Switch(es) (up to 50) to release temperature disturbances
+     CHARACTER(len=lcbuf) :: ctype_tempdist_d(ntempdist_max)   ! Type of temperature disturbance(s)
+     REAL(KIND=wp)     :: htempdist_d(ntempdist_max)   ! Time for release of temperature disturbances [h]
+@@ -1568,6 +1605,9 @@ CONTAINS
+          hillasym_x, hillasym_y, hill_combineaction, &
+          rasofile, itype_artifprofiles, itype_anaprof_tqv, itype_anaprof_uv ,&
+          tkvhfix, tkhhfix, tkvmfix , tkhmfix, lnosurffluxes_m , lnosurffluxes_h , &
++         ! LINDA, b
++         lrce, ldayc, lmlo, depth_mlo, sst_mlo, &
++         ! LINDA, e
+          ltempdist , ctype_tempdist , htempdist , &
+          bub_centi , bub_centj , bub_centz , bub_timespan , &
+          bub_radx , bub_rady , bub_radz , bub_rotangle , bub_dT , &
+@@ -1686,6 +1726,13 @@ CONTAINS
+     tkhmfix_d  = 300.0_wp
+     lnosurffluxes_m_d  = .FALSE.
+     lnosurffluxes_h_d  = .FALSE.
++    !LINDA ,b
++    lrce_d    = .FALSE.
++    ldayc_d    = .FALSE.
++    lmlo_d    = .FALSE.
++    depth_mlo_d = 100._wp
++    sst_mlo_d   = 300._wp
++    !LINDA, e
+     ltempdist_d  = .FALSE.
+     ctype_tempdist_d  = 'cos'
+     htempdist_d  = 0.0_wp
+@@ -1899,6 +1946,13 @@ CONTAINS
+     tkhmfix  = tkhmfix_d
+     lnosurffluxes_m  = lnosurffluxes_m_d
+     lnosurffluxes_h  = lnosurffluxes_h_d
++! LINDA, b
++    lrce    = lrce_d
++    ldayc   = ldayc_d
++    lmlo    = lmlo_d
++    depth_mlo = depth_mlo_d
++    sst_mlo = sst_mlo_d
++! LINDA, e
+     ltempdist  = ltempdist_d
+     ctype_tempdist  = ctype_tempdist_d
+     htempdist  = htempdist_d
+@@ -2478,6 +2532,10 @@ CONTAINS
+         nrbuf = nrbuf +  1;  realbuf (nrbuf) = tkhhfix
+         nrbuf = nrbuf +  1;  realbuf (nrbuf) = tkvmfix
+         nrbuf = nrbuf +  1;  realbuf (nrbuf) = tkhmfix
++! LINDA, b
++        nrbuf = nrbuf +  1;  realbuf (nrbuf) = depth_mlo
++        nrbuf = nrbuf +  1;  realbuf (nrbuf) = sst_mlo
++! LINDA, e
+         nrbuf = nrbuf +  1;  realbuf (nrbuf) = u_infty
+         nrbuf = nrbuf +  1;  realbuf (nrbuf) = href_wk
+         nrbuf = nrbuf +  1;  realbuf (nrbuf) = hmin_wk
+@@ -2533,6 +2591,11 @@ CONTAINS
+         nlbuf = nlbuf +  1;  logbuf  (nlbuf) = ldebug_artif
+         nlbuf = nlbuf +  1;  logbuf  (nlbuf) = lsensiflux_fix
+         nlbuf = nlbuf +  1;  logbuf  (nlbuf) = llatentflux_fix
++! LINDA, b
++        nlbuf = nlbuf +  1;  logbuf  (nlbuf) = lrce
++        nlbuf = nlbuf +  1;  logbuf  (nlbuf) = ldayc
++        nlbuf = nlbuf +  1;  logbuf  (nlbuf) = lmlo
++! LINDA, e
+ !!!logbuftag   used by the ed-script ed_addnl.in which automatically adds nlparams
+ 
+       ENDIF
+@@ -2592,6 +2655,10 @@ CONTAINS
+         nrbuf = nrbuf +  1;  tkhhfix    = realbuf  (nrbuf)
+         nrbuf = nrbuf +  1;  tkvmfix    = realbuf  (nrbuf)
+         nrbuf = nrbuf +  1;  tkhmfix    = realbuf  (nrbuf)
++! LINDA, b
++        nrbuf = nrbuf +  1;  depth_mlo  = realbuf  (nrbuf)
++        nrbuf = nrbuf +  1;  sst_mlo    = realbuf  (nrbuf)
++! LINDA, e
+         nrbuf = nrbuf +  1;  u_infty    = realbuf  (nrbuf)
+         nrbuf = nrbuf +  1;  href_wk    = realbuf  (nrbuf)
+         nrbuf = nrbuf +  1;  hmin_wk    = realbuf  (nrbuf)
+@@ -2647,6 +2714,11 @@ CONTAINS
+         nlbuf = nlbuf +  1;  ldebug_artif    = logbuf  (nlbuf)
+         nlbuf = nlbuf +  1;  lsensiflux_fix    = logbuf  (nlbuf)
+         nlbuf = nlbuf +  1;  llatentflux_fix    = logbuf  (nlbuf)
++! LINDA, b
++        nlbuf = nlbuf +  1;  lrce         = logbuf  (nlbuf)
++        nlbuf = nlbuf +  1;  ldayc         = logbuf  (nlbuf)
++        nlbuf = nlbuf +  1;  lmlo         = logbuf  (nlbuf)
++! LINDA, e
+ !!!logbufbacktag   used by the ed-script ed_addnl.in which automatically adds nlparams
+ 
+       ENDIF
+@@ -2860,6 +2932,18 @@ CONTAINS
+            'lnosurffluxes_m', lnosurffluxes_m, lnosurffluxes_m_d     , ' L '
+       WRITE (nuspecif, '(T8,A,T21,L12,T40,L12,T59,A)')                       &
+            'lnosurffluxes_h', lnosurffluxes_h, lnosurffluxes_h_d     , ' L '
++      ! LINDA, b
++      WRITE (nuspecif, '(T8,A,T21,L12,T40,L12,T59,A)')                           &
++           'lrce',    lrce,    lrce_d        , ' L '
++      WRITE (nuspecif, '(T8,A,T21,L12,T40,L12,T59,A)')                           &
++           'ldayc',    ldayc,    ldayc_d        , ' L '
++      WRITE (nuspecif, '(T8,A,T21,L12,T40,L12,T59,A)')                           &
++           'lmlo',    lmlo,    lmlo_d        , ' L '
++      WRITE (nuspecif, '(T8,A,T21,F12.4,T40,F12.4,T59,A)')                       &
++           'depth_mlo', depth_mlo, depth_mlo_d     , ' R '
++      WRITE (nuspecif, '(T8,A,T21,F12.4,T40,F12.4,T59,A)')                       &
++           'sst_mlo', sst_mlo, sst_mlo_d     , ' R '
++      ! LINDA, e
+       WRITE (nuspecif, '(T8,A,T21,I12,T40,I12,T59,A)')                       &
+            'nlayers_poly', nlayers_poly, nlayers_poly_d     , ' I '
+       WRITE (nuspecif, '(T8,A,T21,F12.4,T40,F12.4,T59,A)')                       &
+@@ -3295,6 +3379,7 @@ CONTAINS
+          zvco_z32(33),      & ! pre-specified vertical coordinates of 32 z-layer LM
+          zvco_z35(36),      & ! pre-specified vertical coordinates of 35 z-layer LM
+          zvco_z40(41),      & ! pre-specified vertical coordinates of 40 z-layer LM
++         zvco_z74(75),      & ! pre-specified vertical coordinates of 74 z-layer RCE
+          zrhf   (ie,je,ke), & !
+          zrhs   (ie,je),    & !
+          zml    (ie,je,ke), & ! height of main levels for mass points
+@@ -3321,6 +3406,7 @@ CONTAINS
+     INTEGER (KIND=iintegers) :: istata, corrcount
+ 
+     REAL(KIND=wp)       :: zdx, zdy, oosqrt2, lenx, oolenx, grad(9)
++    REAL(KIND=wp)       :: c_s_mlo   ! Heat capacity of mixed-layer ocean [J/(m2*K)]
+     !------------------------------------------------------------------------------
+     !- End of header -
+     !------------------------------------------------------------------------------
+@@ -3405,6 +3491,20 @@ CONTAINS
+          1162.0_wp,  1012.0_wp,   872.0_wp,   744.0_wp,   618.0_wp,   493.0_wp,   &
+          369.0_wp,   256.0_wp,   153.0_wp,    68.0_wp,     0.0_wp /)
+ 
++    zvco_z74 = (/33250._wp, 32750._wp, 32250._wp, 31750._wp, 31250._wp, 30750._wp, &
++                 30250._wp, 29750._wp, 29250._wp, 28750._wp, 28250._wp, 27750._wp, &
++                 27250._wp, 26750._wp, 26250._wp, 25750._wp, 25250._wp, 24750._wp, &
++                 24250._wp, 23750._wp, 23250._wp, 22750._wp, 22250._wp, 21750._wp, &
++                 21250._wp, 20750._wp, 20250._wp, 19750._wp, 19250._wp, 18750._wp, &
++                 18250._wp, 17750._wp, 17250._wp, 16750._wp, 16250._wp, 15750._wp, &
++                 15250._wp, 14750._wp, 14250._wp, 13750._wp, 13250._wp, 12750._wp, &
++                 12250._wp, 11750._wp, 11250._wp, 10750._wp, 10250._wp,  9750._wp, &
++                  9250._wp,  8750._wp,  8250._wp,  7750._wp,  7250._wp,  6750._wp, &
++                  6250._wp,  5750._wp,  5250._wp,  4750._wp,  4250._wp,  3750._wp, &
++                  3250._wp,  2750._wp,  2260._wp,  1850._wp,  1478._wp,  1184._wp, &
++                   940._wp,   746._wp,   588._wp,   452._wp,   338._wp,   238._wp, &
++                   150._wp,    74._wp,     0._wp /) 
++
+ 
+     !-------------------------------------------------------
+     !
+@@ -3503,6 +3603,11 @@ CONTAINS
+           DO k = 1, ke1
+             vcoord%vert_coord(k) = zvco_z40(k)
+           ENDDO
++        ELSEIF ( ke == 74 ) THEN
++          vcoord%vcflat = 11357.0_wp
++          DO k = 1, ke1
++            vcoord%vert_coord(k) = zvco_z74(k)
++          ENDDO
+         ELSE
+           WRITE (*,*) '***   No vertical coordinates are pre-specified    ***'
+           WRITE (*,*) '***  for ke=',ke,' layers and ivctype=',vcoord%ivctype,'  ***'
+@@ -3555,6 +3660,11 @@ CONTAINS
+             vcoord%vert_coord(k) = zvco_z40(k)
+           ENDDO
+           vcoord%vcflat = vcoord%vert_coord(1)
++        ELSEIF ( ke == 74 ) THEN
++          vcoord%vcflat = 11357.0_wp
++          DO k = 1, ke1
++            vcoord%vert_coord(k) = zvco_z74(k)
++          ENDDO
+         ELSE
+           WRITE (*,*) '***   No vertical coordinates are pre-specified    ***'
+           WRITE (*,*) '***  for ke=',ke,' layers and ivctype=',vcoord%ivctype,'  ***'
+@@ -3742,13 +3852,13 @@ CONTAINS
+ 
+     ! enforce periodic boundary conditions for s_oro if required:
+     IF (lperi_x .OR. lperi_y .OR. l2dim) THEN
+-      kzdims(1:24)=(/1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
++      kzdims(1:24)=(/1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+       CALL exchg_boundaries                                                  &
+            ( 0,  sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-           kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh,      &
++           kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh,      &
+            lperi_x, lperi_y, l2dim, &
+            10000, .FALSE., ncomm_type, izerror, yzerrmsg,                  &
+-           s_oro )
++           s_oro(:,:),hsurf(:,:) )
+     END IF
+     ! LINDA, e
+     !------------------------------------------------------------------------------
+@@ -3858,11 +3968,48 @@ CONTAINS
+       ! ...
+       !<< END ASCII-FILE
+ 
++    CASE (3)
++      ! Read fr_land  from external NetCDF file
++      CALL read_soilparams_from_netcdf()
++
++      ! Initialize soil with constant values
++      gz0    (:,:) = g * z0_c   ! z0 * g in m^2/s^2
++      soiltyp(:,:) = soiltyp_c
++      plcov  (:,:) = plcov_c
++      lai    (:,:) = lai_c
++      rootdp (:,:) = rootdp_c
++
++      ! In case someone uses the radiation scheme:
++      IF (lrad) THEN
++        vio3    (:,:) = 0.06_wp   !vio3_c ! vertical integrated ozone content [Pa O3]
++        hmo3    (:,:) = 4200.0_wp !hmo3_c ! ozone maximum                     [Pa]
++      END IF
++
++      ! For taking into account forests:
++      IF (lforest) THEN
++        for_e(:,:) = for_e_c
++        for_d(:,:) = for_d_c
++      ENDIF
++
++      ! For sea ice modeling and lake modeling:
++      IF (lseaice .OR. llake) THEN
++        h_ice(:,:,nnew) = h_ice_c
++        t_ice(:,:,nnew) = t_ice_c
++      ENDIF
++
++      ! For the subgrid scale orography scheme:
++      IF (lsso) THEN
++        sso_stdh  = 20.0_wp      ! standard deviation of sub-grid scale orography ( m   )
++        sso_gamma = 0.0_wp       ! anisotropy of sub-grid scale orography          --
++        sso_theta = 0.25_wp * pi ! angle betw. principal axis of orography and E  ( rad )
++        sso_sigma = 0.05_wp      ! mean slope of sub-grid scale orography          --
++      END IF
++
+     CASE default
+ 
+       CALL model_abort (my_world_id, 10006, &
+            'Error in itype_soil_c, src_artifdata', &
+-           'src_artifdata, wrong value of itype_soil_c encounterd in '//TRIM(yzroutine)//'()')
++           'src_artifdata, error encounterd in '//TRIM(yzroutine)//'()')
+       RETURN
+ 
+     END SELECT
+@@ -4625,6 +4772,59 @@ CONTAINS
+            1, ie, 1, je )
+     ENDIF
+ 
++    IF (.not.lsoil) THEN
++
++      t_g(:,:,nnew) = t_s(:,:,nnew) 
++      t_g(:,:,nnow) = t_s(:,:,nnew) 
++      t_s(:,:,nnow) = t_s(:,:,nnew) 
++
++      IF ((lseaice.or.llake)) THEN
++        IF (my_cart_id == 0) THEN
++          PRINT *, ' Correction of h_ice and t_ice'
++        ENDIF        
++        DO j=1,je
++          DO i=1,ie
++             IF (t_s(i,j,nnew).gt.t0_melt) THEN
++               h_ice(i,j,nnew) = 0.0_wp
++               t_ice(i,j,nnew) = t_s(i,j,nnew)
++               h_ice(i,j,nnow) = 0.0_wp
++               t_ice(i,j,nnow) = t_s(i,j,nnew)
++             ENDIF
++           ENDDO
++         ENDDO
++      ENDIF
++
++    ENDIF
++
++    ! run with mixed-layer ocean, Linda Schlemmer, 2018
++
++    IF ( lmlo .and. lsoil ) THEN
++      CALL model_abort (my_world_id, 13477, &
++           'ERROR in soil spec., src_artifdata', &
++           'choose either lmlo or lsoil')
++      RETURN
++    END IF
++
++    IF (lmlo) THEN
++       ! determine heat capacity of mixed-layer ocean based on the depth of the mixed-layer ocean
++       ! the depth gives the mass of the ocean, c_s is in units of J/(K*m2)
++       c_s_mlo = rho_w * chc_w * depth_mlo
++       oo_c_s_mlo = 1./c_s_mlo
++       ! set initial value for t_s and t_g
++       t_s   (:,:,nnew) = sst_mlo
++       t_g   (:,:,nnew) = sst_mlo
++
++
++       ! .. control output
++       IF (my_cart_id == 0) THEN
++
++          WRITE (*,*)
++          WRITE (*,*)  'Heat capacity of mixed-layer ocean:',c_s_mlo
++          WRITE (*,*)
++
++       ENDIF
++    END IF
++
+ #ifdef SERIALIZE
+     v(:,:,:,nnew) = 1.0_wp
+     CALL fld_perturb('v', v(:,:,:,nnew), 1.0e-5_wp) 
+@@ -5083,6 +5283,110 @@ CONTAINS
+     END SUBROUTINE read_soilparams_from_files
+ 
+ 
++    ! NetCDF I/O DL_2019
++    SUBROUTINE read_soilparams_from_netcdf()
++
++      IMPLICIT NONE
++
++      REAL(KIND=wp), ALLOCATABLE:: recrd_tot(:), fld_tot(:,:)
++      !DL_DELETE
++      INTEGER(KIND=iintegers) :: mpierror, nlandpoints_tot
++
++      INTEGER(KIND=iintegers) :: ie_p, je_p, it, jt, ij
++
++      INTEGER (KIND=iintegers) ::  ncid
++      CHARACTER (LEN=80)             :: yerrmsg
++
++      INTEGER  (KIND=iintegers)       ::  &
++      myzvar, myzlev, myzlevtot,   & ! organization indices returned by write_netcdf
++      ivar_count,  & ! actual index in the variable list
++      ilev_count,  & ! actual level of a 3D variable
++      var_ida(1),   &
++      varid,       &
++      iz_rsize
++
++
++      IF (my_cart_id == 0 .AND. ldebug_artif .AND. idbg_artif_level > 0) THEN
++        WRITE (*,*)  'Subr. read_soilparams_from_netcdf() ...'
++      END IF
++
++      ALLOCATE(recrd_tot(ie_tot*je_tot))
++      ALLOCATE(fld_tot(ie_tot,je_tot))
++
++      ! instead of read_nc_vdefs 
++      IF (my_cart_id == 0 .OR. num_compute == 1) THEN
++        ! File only gets read on proc 0
++
++        CALL open_file (ncid, TRIM(frlandfile), 'r', 'ncdf', icomm_cart, &
++                        my_cart_id, 1, .FALSE. , .FALSE.,      &
++                        idbg_artif_level, yerrmsg, ierror)
++ 
++        ierror=nf90_inq_varid(ncid, "FR_LAND", varid) 
++
++        IF (ierror /= 0) THEN
++          CALL model_abort (my_cart_id, 2014, yerrmsg, 'read_soilparams_from_netdf')
++        ENDIF
++
++        !ivar_count and ilev_count cant be const, since they are intent(OUT)
++        var_ida(1) = varid
++        ivar_count = 1
++        ilev_count = 0
++
++        !Variable varid is read into the global array recrd and distributed to each proc
++        CALL read_netcdf  (ncid, ie_tot, je_tot, ivar_count, ilev_count,       &
++                           var_ida(1), 1, idims_id_in, ndims_id_in,            &
++                           icomm_cart, my_cart_id, 1          ,                &
++                           0_iintegers, 0_iintegers, 0_iintegers, 0_iintegers, &
++                           recrd_tot, myzvar, myzlev, myzlevtot, iz_rsize,     &
++                           imp_grib, .FALSE., yerrmsg, ierror)
++
++
++        ! close grib file (has to be called by all PEs)
++        CALL close_file (ncid, 'ncdf', icomm_cart, my_cart_id,            &
++                         1, .FALSE., .FALSE., idbg_artif_level,           &
++                         yerrmsg, ierror)
++
++        IF (ierror /= 0) THEN
++          CALL model_abort (my_cart_id, 2017, yerrmsg, 'read_soilparams_from_netdf')
++        ENDIF
++
++        DO j = 1, je_tot
++          DO i = 1, ie_tot
++            fld_tot(i,j) = recrd_tot((j - 1) * ie_tot + i)
++          ENDDO
++        ENDDO
++
++      END IF !my_cart_id == 0
++
++      IF (num_compute > 1) THEN
++        CALL distribute_field(fld_tot, ie_tot, je_tot, fr_land, ie, je, 0, ierror)
++      ELSE
++        fr_land = fld_tot
++      END IF
++
++      DEALLOCATE(recrd_tot)
++      DEALLOCATE(fld_tot)
++
++      ! enforce periodic boundary conditions or 2dim-exchange if required:
++      IF (lperi_x .OR. lperi_y .OR. l2dim) THEN
++        izerror     = 0_iintegers
++        yzerrmsg(:) = ' '
++        kzdims(1:24)=(/1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
++        CALL exchg_boundaries                                                        &
++             ( 0,  sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
++             kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh,    &
++             lperi_x, lperi_y, l2dim,                                                &
++             10000, .FALSE., ncomm_type, izerror, yzerrmsg,                          &
++             fr_land )
++      END IF
++
++      IF (ierror /= 0) THEN
++        CALL model_abort (my_cart_id, 2018, yerrmsg, 'read_soilparams_from_netdf')
++      ENDIF
++    
++    END SUBROUTINE read_soilparams_from_netcdf
++
++
+     ! Subroutine to initialize soil temperature and water saturation
+     ! as well as snow parameters and interception store
+     ! with constant values t_soil_c, wf_soil_c, t_snow_c, w_snow_c, and
+@@ -6082,7 +6386,7 @@ CONTAINS
+       kzdims(1:24)=(/1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+       CALL exchg_boundaries                                                  &
+            ( 0,  sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-           kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh,      &
++           kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh,      &
+            lperi_x, lperi_y, l2dim, &
+            10000, .FALSE., ncomm_type, izerror, yzerrmsg,                  &
+            hsurf )
+@@ -6280,7 +6584,7 @@ CONTAINS
+       kzdims(1:24)=(/1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+       CALL exchg_boundaries                                                  &
+            ( 0,  sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-           kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh,      &
++           kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh,      &
+            lperi_x, lperi_y, l2dim, &
+            10000, .FALSE., ncomm_type, izerror, yzerrmsg,                  &
+            feld_loc )
+@@ -6479,6 +6783,7 @@ CONTAINS
+     END IF
+ 
+     IF (num_compute > 1) THEN
++
+       ! Distribute the data to all PEs:
+       CALL distribute_values(anz,    1, 0, imp_integers, icomm_cart, mpierror)
+ 
+@@ -6564,6 +6869,7 @@ CONTAINS
+     ! catch errors:
+     !==============
+     ! 1) height range of rasodata is not sufficient:
++
+     IF (MAXVAL(zin) < MAXVAL(zml)) THEN
+       WRITE (*,*) 'ERROR: problem in read_raso(): uppermost data point in raso-file'//&
+            TRIM(rasofile)//' is too low! Abort!'
+@@ -6877,7 +7183,7 @@ CONTAINS
+       kzdims(1:24)=(/ke1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+       CALL exchg_boundaries &
+            (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-           kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++           kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+            lperi_x, lperi_y, l2dim, &
+            20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+            w(:,:,:,ntlev) )
+@@ -8061,7 +8367,7 @@ CONTAINS
+       kzdims(1:24)=(/ke,ke,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+       CALL exchg_boundaries &
+            (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-           kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++           kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+            lperi_x, lperi_y, l2dim, &
+            20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+            t(:,:,:,nx), zqv(:,:,:) )
+@@ -8339,7 +8645,7 @@ CONTAINS
+             kzdims(1:24)=(/ke_soil+2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+             CALL exchg_boundaries &
+                  (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-                 kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++                 kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+                  lperi_x, lperi_y, l2dim, &
+                  20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+                  t_so(:,:,:,nx) )
+@@ -8347,7 +8653,7 @@ CONTAINS
+             kzdims(1:24)=(/ke_soil+2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+             CALL exchg_boundaries &
+                  (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-                 kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++                 kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+                  lperi_x, lperi_y, l2dim, &
+                  20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+                  t_so(:,:,:,nx), t_cl(:,:) )
+@@ -8356,7 +8662,7 @@ CONTAINS
+           kzdims(1:24)=(/1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+           CALL exchg_boundaries &
+                (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-               kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++               kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+                lperi_x, lperi_y, l2dim, &
+                20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+                t_s(:,:,nx), t_m(:,:,nx), t_cl(:,:) )
+@@ -8567,7 +8873,7 @@ CONTAINS
+         kzdims(1:24)=(/1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+         CALL exchg_boundaries &
+              (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-             kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++             kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+              lperi_x, lperi_y, l2dim, &
+              20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+              t_s(:,:,nnow), t_snow(:,:,nnow), t_g(:,:,nnow),  &
+@@ -8937,7 +9243,7 @@ CONTAINS
+       kzdims(1:24)=(/ke,ke,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+       CALL exchg_boundaries &
+            (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-           kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++           kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+            lperi_x, lperi_y, l2dim, &
+            20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+            ttens(:,:,:), zqv_tens(:,:,:) )
+@@ -9248,7 +9554,7 @@ CONTAINS
+             kzdims(1:24)=(/ke_soil+2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+             CALL exchg_boundaries  &
+                  (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-                 kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++                 kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+                  lperi_x, lperi_y, l2dim, &
+                  20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+                  t_so(:,:,:,nx) )
+@@ -9256,7 +9562,7 @@ CONTAINS
+             kzdims(1:24)=(/ke_soil+2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+             CALL exchg_boundaries  &
+                  (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-                 kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++                 kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+                  lperi_x, lperi_y, l2dim, &
+                  20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+                  t_so(:,:,:,nx), t_cl(:,:) )
+@@ -9265,7 +9571,7 @@ CONTAINS
+           kzdims(1:24)=(/1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+           CALL exchg_boundaries &
+                (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-               kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++               kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+                lperi_x, lperi_y, l2dim, &
+                20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+                t_s(:,:,nx), t_m(:,:,nx), t_cl(:,:) )
+@@ -9566,7 +9872,7 @@ CONTAINS
+       kzdims(1:24)=(/ke1,ke,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+       CALL exchg_boundaries &
+            (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je, &
+-           kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++           kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+            lperi_x, lperi_y, l2dim, &
+            20000, .FALSE., ncomm_type, izerror, yzerrmsg, &
+            w(:,:,:,nx), t(:,:,:,nx) )
+@@ -10322,7 +10628,7 @@ CONTAINS
+     kzdims(1:24)=(/kdim,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
+     CALL exchg_boundaries                                                &
+          (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je,           &
+-         kzdims, jstartpar, jendpar, nbl_exchg, nboundlines, my_cart_neigh, &
++         kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
+          lperi_x, lperi_y, l2dim, &
+          20000, .FALSE., ncomm_type, izerror, yzerrmsg,              &
+          fnoise(:,:,1:kdim) )
+@@ -12182,6 +12488,121 @@ CONTAINS
+ 
+ !==============================================================================
+ 
++  SUBROUTINE t_mlo
++
++
++!============================================================================
++  
++    IMPLICIT NONE
++
++
++    ! Local scalars:
++    ! -------------
++
++    INTEGER                 :: i, j, izerror
++
++    REAL    (KIND=wp   ) ::  &
++
++    zdt                       ! integration time-step [s]
++
++    INTEGER (KIND=iintegers):: ind
++
++    REAL    (KIND=wp   ) ::  &
++
++    t_mean,                     &  ! domain_mean SST [K]
++    tau_sst
++
++    REAL(KIND=wp) :: q_forc     (ie,je), & ! domain mean q_net (sum of sw+lw+sh+lh)    ( W/m2 )
++                         ttens_mlo  (ie,je)    ! temperature tendency of mixed-layer ocean ( K/s  )
++
++    CHARACTER(len=250)      :: yzerrmsg
++
++    CHARACTER(LEN=25)       :: yzroutine = 't_mlo'
++
++    ierror  = 0_iintegers
++    yzerrmsg = ''
++
++!----------------------------------------------------------------------------
++! Begin Subroutine t_mlo
++! Compute temperature of mixed-layer ocean (slab ocean)
++!----------------------------------------------------------------------------
++
++    IF ( (ntstep == 0) .AND. (.NOT. l2tls) ) THEN
++       ! use the original dt and not dt/2
++       zdt = 2 * dt
++    ELSE
++       zdt = dt
++    ENDIF
++
++    !tau_sst = 21600._wp
++    tau_sst = 604800._wp
++
++    ! Compute domain mean forcing
++    t_mean = 0.0_wp
++    ind    = 0
++
++    DO j = 1,je
++       DO i = 1,ie
++
++          q_forc(i,j)   = shfl_s(i,j) + lhfl_s(i,j) + sobs(i,j) + thbs(i,j)
++
++       END DO
++    END DO
++    DO j = jstart,jend
++       DO i = istart,iend
++
++          t_mean        = t_mean + t_s(i,j,nnow)
++          ind           = ind + 1
++       END DO
++    END DO
++
++    ! Relaxation towards domain mean SST with a timescale of 6 hours
++    ! Collecting the values from all nodes in the parallel mode
++
++    IF (num_compute > 1) THEN
++
++       CALL global_values (t_mean, 1, 'SUM', imp_reals, icomm_cart, -1, &
++         yzerrmsg, izerror)
++       IF ( izerror /= 0_iintegers ) THEN
++          yzerrmsg = "problem computing the sum"
++          CALL model_abort( my_cart_id, izerror, yzerrmsg, TRIM(yzroutine) )
++       ENDIF
++
++       CALL global_values (ind, 1, 'SUM', imp_integers, icomm_cart, -1, &
++         yzerrmsg, izerror)
++       IF ( izerror /= 0_iintegers ) THEN
++          yzerrmsg = "problem computing the sum"
++          CALL model_abort( my_cart_id, izerror, yzerrmsg, TRIM(yzroutine) )
++       ENDIF
++
++    END IF
++         
++    !IF (my_cart_id == 0) THEN
++      ! Computing the mean values
++        
++       t_mean = t_mean/real(ind,wp)
++
++    !END IF
++
++    DO j = 1,je
++       DO i = 1,ie
++
++          ttens_mlo(i,j) = q_forc(i,j)*oo_c_s_mlo - (t_s(i,j,nnow)-t_mean)/tau_sst
++
++       END DO
++    END DO
++
++    ! update t_s and t_g with an Euler forward step
++
++    DO j = 1,je
++       DO i = 1,ie
++
++          t_s(i,j,nnew) = t_s(i,j,nnew) + zdt*ttens_mlo(i,j)
++          t_g(i,j,nnew) = t_g(i,j,nnew) + zdt*ttens_mlo(i,j)
++
++       END DO
++    END DO
+ 
++END SUBROUTINE t_mlo
+ 
+ END MODULE src_artifdata
+diff --git a/cosmo/src/src_meanvalues.f90 b/cosmo/src/src_meanvalues.f90
+index d7e36371..3041eb63 100644
+--- a/cosmo/src/src_meanvalues.f90
++++ b/cosmo/src/src_meanvalues.f90
+@@ -193,6 +193,7 @@ USE data_fields     , ONLY :   &
+     snow_con   ,    & ! amount of snow from convective precip. (sum)  (kg/m2)
+     dpsdt             ! tendency of the surface pressure              ( Pa/s)
+ 
++    USE data_fields, ONLY : w_so, w_so_ice, t_so, llandmask
+ !------------------------------------------------------------------------------
+ 
+ USE data_runcontrol , ONLY :   &
+@@ -272,6 +273,9 @@ USE parallel_utilities,       ONLY :  &
+ USE src_tracer  ,             ONLY : trcr_get, trcr_errorstr
+ USE data_tracer ,             ONLY : T_ERR_NOTFOUND
+ 
++! CHA CRC
++USE m_crc16
++
+ !==============================================================================
+ 
+ IMPLICIT NONE
+@@ -1537,11 +1541,11 @@ CHARACTER (LEN=20) ::                                                   &
+       imin = itmp(1)
+       jmin = itmp(2)
+       min_val = fld_tot(imin,jmin)
+-      mean_val = SUM(fld_tot) / REAL(ie_tot*je_tot, wp)
++      mean_val = SUM(fld_tot) / REAL(ie_tot*je_tot, wp)          
+ 
+       ! write to file
+-      WRITE(nunit_loc, "(A8,I6,I5,ES28.19,2I5,ES28.19,2I5,ES28.19)")    &
+-        TRIM(fld_name), ntstep, k, min_val, imin, jmin,                 &
++      WRITE(nunit_loc, "(A8,I6,I5,ES28.19,2I5,ES28.19,2I5,ES28.19)")     &
++        TRIM(fld_name), ntstep, k, min_val, imin, jmin,                  &
+         max_val, imax, jmax, mean_val
+ 
+     END IF
+@@ -1557,6 +1561,7 @@ CHARACTER (LEN=20) ::                                                   &
+ 
+ END SUBROUTINE print_testsuite_3d
+ 
++
+ !==============================================================================
+ !==============================================================================
+ !+ Module procedure printing min,max and mean for a given 2d field
+@@ -1616,6 +1621,7 @@ CHARACTER (LEN=80) ::                                                   &
+ CHARACTER (LEN=20) ::                                                   &
+   yzroutine
+ 
++
+ !------------------------------------------------------------------------------
+ !- End of header -
+ !------------------------------------------------------------------------------
+@@ -1661,12 +1667,12 @@ CHARACTER (LEN=20) ::                                                   &
+       itmp = MINLOC(fld_tot)-1+LBOUND(fld_tot)
+       imin = itmp(1)
+       jmin = itmp(2)
+-      min_val = fld_tot(imin,jmin)
++      min_val = fld_tot(imin,jmin)      
+       mean_val = SUM(fld_tot) / REAL(ie_tot*je_tot, wp)
+ 
+       ! write to file
+-      WRITE(nunit_loc, "(A8,I6,I5,ES28.19,2I5,ES28.19,2I5,ES28.19)")    &
+-        TRIM(fld_name), ntstep,0, min_val, imin, jmin,                 &
++      WRITE(nunit_loc, "(A8,I6,I5,ES28.19,2I5,ES28.19,2I5,ES28.19)") &
++        TRIM(fld_name), ntstep,0, min_val, imin, jmin,                   &
+         max_val, imax, jmax, mean_val
+ 
+     END IF
+diff --git a/cosmo/src/src_output.f90 b/cosmo/src/src_output.f90
+index c0ffec07..cf6a4518 100644
+--- a/cosmo/src/src_output.f90
++++ b/cosmo/src/src_output.f90
+@@ -484,6 +484,8 @@ USE data_constants, ONLY : &
+     rvd_m_o,      & ! r_v/r_d - 1
+     o_m_rdv,      & ! 1 - r_d/r_v
+     cpdr,         & ! 1.0 / cp_d
++    lh_v,         & ! latent heat of vapourization
++    lh_s,         & ! latent heat of sublimation
+     t0_melt,      & ! melting temperature
+     rho_w,        & ! density of liquid water
+     rho_ice,      & ! density of ice          (kg/m^3)
+@@ -3002,7 +3004,7 @@ ENDIF
+           END DO
+         END DO
+         !$acc end parallel
+-        CALL califlxqu( zvarlev(:,:,1), rho, hhl, zvarlev(:,:,2:ke+1), u(:,:,:, itl), ie,je,ke)
++        CALL califlxqu( zvarlev(:,:,1), zrho_itl, hhl, zvarlev(:,:,2:ke+1), u(:,:,:, itl), ie,je,ke)
+       ELSEIF ( ylist(n)(1:izlen) == 'TWATFLXV' ) THEN
+         !$acc parallel present (qv,qc,qi,qr,qs,qg,v)
+         DO k=1,ke
+@@ -3019,7 +3021,30 @@ ENDIF
+           END DO
+         END DO
+         !$acc end parallel
+-        CALL califlxqv( zvarlev(:,:,1), rho, hhl, zvarlev(:,:,2:ke+1), v(:,:,:, itl), ie,je,ke)
++        CALL califlxqv( zvarlev(:,:,1), zrho_itl, hhl, zvarlev(:,:,2:ke+1), v(:,:,:, itl), ie,je,ke)
++      ELSEIF ( ylist(n)(1:izlen) == 'FMSE' ) THEN
++        ! Vertically-Integrated Frozen Moist Static Energy following Bretherton & Khairoutdinov (2005), JAS
++        ! h_f = c_p * T + gz + L qv - L_f qi
++
++        !$acc parallel present (t,hhl,qv,qi,qg,qs)
++        DO k=1,ke
++          !$acc loop gang
++          DO j=1,je
++            !$acc loop vector
++            DO i=1,ie
++
++              zvarlev(i,j,k+1) = cp_d * t(i,j,k,itl) + 0.5_wp * g * ( hhl(i,j,k) + hhl(i,j,k+1) )
++
++                             zvarlev(i,j,k+1) = zvarlev(i,j,k+1) + lh_v * qv(i,j,k)
++              IF (lassoc_qi) zvarlev(i,j,k+1) = zvarlev(i,j,k+1) - lh_s * qi(i,j,k)
++              IF (lassoc_qg) zvarlev(i,j,k+1) = zvarlev(i,j,k+1) - lh_s * qg(i,j,k)
++              IF (lassoc_qs) zvarlev(i,j,k+1) = zvarlev(i,j,k+1) - lh_s * qs(i,j,k)
++            END DO
++          END DO
++        END DO
++        !$acc end parallel
++
++        CALL caliq( zvarlev(:,:,1), zrho_itl, hhl, zvarlev(:,:,2:ke+1), ie,je,ke, lacc=.TRUE.)
+       ELSEIF ( ylist(n)(1:izlen) == 'TQI') THEN
+         IF (ASSOCIATED(qi)) THEN
+           CALL caliq( zvarlev(:,:,1), zrho_itl, hhl, qi(:,:,:), ie,je,ke, lacc=.TRUE. )
+diff --git a/cosmo/src/src_setup.f90 b/cosmo/src/src_setup.f90
+index a9683ac9..a056a045 100644
+--- a/cosmo/src/src_setup.f90
++++ b/cosmo/src/src_setup.f90
+@@ -669,7 +669,8 @@ USE utilities,          ONLY :  &
+ !------------------------------------------------------------------------------
+ 
+ USE environment,              ONLY :  &
+-      init_environment, model_abort, init_procgrid, get_free_unit
++      init_environment, model_abort, init_procgrid, get_free_unit,      &
++      exchg_boundaries
+ 
+ !------------------------------------------------------------------------------
+ 
+@@ -687,6 +688,7 @@ USE vgrid_refatm_utils,       ONLY :  &
+ 
+ USE src_block_fields,       ONLY :  init_block_fields
+ 
++USE src_artifdata,            ONLY:  lrce
+ !------------------------------------------------------------------------------
+ 
+ #ifdef MESSY
+@@ -3471,7 +3473,8 @@ INTEGER (KIND=iintegers)  ::  i, j, k, i_td, j_td, j2dim, izerror,           &
+                               irel_west, irel_east, jrel_south, jrel_north,  &
+                               istart_tot , iend_tot , jstart_tot , jend_tot, &
+                               istartu_tot, iendu_tot, jstartu_tot, jendu_tot,&
+-                              istartv_tot, iendv_tot, jstartv_tot, jendv_tot
++                              istartv_tot, iendv_tot, jstartv_tot, jendv_tot,&
++                              kzdims(24)
+ 
+ CHARACTER (LEN=80)        ::  yzerrmsg
+ 
+@@ -3556,7 +3559,7 @@ CHARACTER (LEN=80)        ::  yzerrmsg
+   ENDIF
+ 
+   ! run without metric terms in an f-plane
+-  IF (lmetr .EQV. .FALSE.) THEN
++  IF ((lmetr .EQV. .FALSE.).or.(lrce.EQV. .TRUE.)) THEN
+     crlat (:,:) = 1.0_wp
+     acrlat(:,:) = 1.0_wp / r_earth
+     tgrlat(:,:) = 0.0_wp
+@@ -3572,6 +3575,18 @@ CHARACTER (LEN=80)        ::  yzerrmsg
+ 
+   ENDIF
+ 
++  IF (lperi_x .OR. lperi_y .OR. l2dim) THEN
++    izerror     = 0_iintegers
++    yzerrmsg    = ' '
++    kzdims(1:24) = (/1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0/)
++    CALL exchg_boundaries                                                  &
++    (0, sendbuf, isendbuflen, imp_reals, icomm_cart, num_compute, ie, je,  &
++     kzdims, jstartpar, jendpar, nboundlines, nboundlines, my_cart_neigh, &
++     lperi_x, lperi_y, l2dim,                                              &
++     10000, .FALSE., ncomm_type, izerror, yzerrmsg,                        &
++     fc(:,:) )
++  END IF
++
+   ! Davies-Parameter rmy for Arakawa-C-grid:
+   ! --------------------------------------
+   IF ( (lperi_x .AND. lperi_y) ) THEN
+diff --git a/cosmo/src/src_setup_vartab.f90 b/cosmo/src/src_setup_vartab.f90
+index 6760f2f2..ba4bf5c6 100644
+--- a/cosmo/src/src_setup_vartab.f90
++++ b/cosmo/src/src_setup_vartab.f90
+@@ -417,6 +417,7 @@ USE data_fields,        ONLY:                              &
+     athb_t     ,    & ! average thermal radiation budget (model top)  ( W/m2)
+      sod_t     ,    & ! solar downward radiation at top of atmosphere (     )
+     asod_t     ,    & ! averaged solar downward radiation at top      (     )
++    sodwddm    ,    & ! downward direct solar radiative flux / smu0   ( W/m2)
+     dursun     ,    & ! sunshine duration                             (  s  )
+     dursun_m   ,    & ! maximum possible sunshine duration             (  s  )
+     dursun_r   ,    & ! relative sunshine duration                     (  s  )
+@@ -704,6 +705,8 @@ var(1,114,1)= ar_des('THBT_RAD  ',     8,  0,  0,   1.0_wp    , 0.0_wp,   0,   2
+       'W m-2       ','net_downward_longwave_flux_in_air',     'TOA outgoing longwave radiation',          ' ')
+ var(2,114,1)= ar_des('ATHB_T    ',     8,  0,  0,   1.0_wp    , 0.0_wp,   3,   2,  -1,     dum4,  dum4,  dum3,   dum3,  athb_t, 1,& 
+       'W m-2       ','net_downward_longwave_flux_in_air',     'averaged TOA outgoing longwave radiation',          ' ')
++var(1,119,1)= ar_des('SODWD     ',     8,  0,  0,   1.0_wp    , 0.0_wp,   0,   2,  -1,     dum4,  dum4,  dum3,   dum3,   sodwddm, 1,& 
++      'W m-2       ','downward_direct_solar_radiation_flux',  'TOA downward direct shortwave radiation',     ' ')
+ var(1,121,1)= ar_des('LHFL_S    ',     1,  0,  0,   1.0_wp    , 0.0_wp,   0,   2,  -1,     dum4,  dum4,  dum3,   dum3,  lhfl_s, 1,&
+       'W m-2       ','surface_downward_latent_heat_flux',  'surface latent heat flux',               ' ')
+ var(2,121,1)= ar_des('ALHFL_S   ',     1,  0,  0,   1.0_wp    , 0.0_wp,   3,   2,  -1,     dum4,  dum4,  dum3,   dum3, alhfl_s, 1,&
+@@ -1195,6 +1198,8 @@ var(1, 35,10)= ar_des('ATWATFLXU  ',    1, 0,  0,   1.0_wp    , 0.0_wp,   3,   2
+       'kg m-1 s-1  ','atmosphere_water_flux    ',                    'average total zonal water flux',                           ' ')
+ var(1, 36,10)= ar_des('ATWATFLXV  ',    1, 0,  0,   1.0_wp    , 0.0_wp,   3,   2,  -1,     dum4,  dum4,  dum3,   dum3,    atwatflxv, 1,&
+       'kg m-1 s-1  ','atmosphere_water_flux    ',                    'average total medirional water flux',                           ' ')
++var(1, 39,10)= ar_des('FMSE        ',     1,  0,  0,   1.0_wp  , 0.0_wp,   0,   2,  -1,     dum4,  dum4,  dum3,   dum3,    dum2, 0,& 
++      'J kg-1      ','frozen_moist_static_energy',                   'total frozen moist static energy',                           ' ')
+ var(1, 61,10)= ar_des('TOT_SNOW  ',     1, 0,  0,   1.0_wp    , 0.0_wp,   4,   2,  -1,     dum4,  dum4,  dum3,   dum3,    dum2, 0,&
+       'kg m-2      ','snow_fall_amount',                            'total snow fall amount',               ' ')
+ var(1, 22,10)= ar_des('ASWD_S    ',     1, 0,  0,   1.0_wp    , 0.0_wp,   3,   2,  -1,     dum4,  dum4,  dum3,   dum3,    dum2, 0,&
+@@ -1260,6 +1265,7 @@ IF (lcheck_alloc) THEN
+   IF (.NOT. ALLOCATED(thbs     ))  var(1,112,1)%idef_stat = -1
+   IF (.NOT. ALLOCATED(athb_s   ))  var(2,112,1)%idef_stat = -1
+   IF (.NOT. ALLOCATED(sobt     ))  var(1,113,1)%idef_stat = -1
++  IF (.NOT. ALLOCATED(sodwddm  ))  var(1,119,1)%idef_stat = -1
+   IF (.NOT. ALLOCATED(asob_t   ))  var(2,113,1)%idef_stat = -1
+   IF (.NOT. ALLOCATED(thbt     ))  var(1,114,1)%idef_stat = -1
+   IF (.NOT. ALLOCATED(athb_t   ))  var(2,114,1)%idef_stat = -1
+ 

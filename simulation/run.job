@@ -1,0 +1,46 @@
+#!/bin/bash
+#SBATCH --account=s916
+#SBATCH --nodes=49
+##SBATCH --tasks=49
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:1
+#SBATCH --time=24:00:00
+#SBATCH --output=rce.out
+#SBATCH --error=rce.err
+#SBATCH --job-name=rce_300
+#SBATCH --constraint=gpu
+#SBATCH --partition=normal
+
+module load daint-gpu
+module unload cudatoolkit
+module load cudatoolkit/10.0.130_3.22-7.0.1.0_5.2__gdfb4ce5
+module load grib_api/1.13.1-CrayCCE-19.10
+
+
+#export CRAY_CUDA_MPS=1
+
+module list
+
+# set environment
+export MALLOC_MMAP_MAX_=0
+export MALLOC_TRIM_THRESHOLD_=536870912
+export OMP_NUM_THREADS=1
+export MV2_ENABLE_AFFINITY=0
+export MV2_USE_CUDA=1
+export MPICH_RDMA_ENABLED_CUDA=1
+export MPICH_G2G_PIPELINE=256
+
+export CRAY_CUDA_PROXY=0
+export CUDA_VA_RESERVATION_CHUNK_SIZE=4294967296
+
+#Tasks if async I/O; Get assigned round robin. 4 has been found emerically for Piz Daint
+#export COSMO_NPROC_NODEVICE=0
+
+# Set this to avoid segmentation faults
+ulimit -s unlimited
+ulimit -a
+
+/bin/rm YU*
+
+# Run CLM in working directory
+srun -u  cosmo
