@@ -43,3 +43,9 @@ The more complex analysis and the plots were done in Python 3.6.5.7 using Jupyte
   - analysis_jptr/Dependence_on_island_size.ipynb; SI Fig. 2, SI FIg. 3
 
     Note that the nomenclature of the experiments is different: ALL -> 10LAND, SMALL -> 5LAND
+    
+    
+FIGRUES
+=======
+
+The plots obtained from matplotlib and NCL were postprocessed in Inkscape v. 0.95. The software was used to arrange all panels and make fonts, labels and line colors consistent. The repsective *.svg files as well as all the "input" are listed in the directory figures
