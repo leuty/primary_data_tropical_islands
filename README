@@ -48,4 +48,4 @@ The more complex analysis and the plots were done in Python 3.6.5.7 using Jupyte
 FIGRUES
 =======
 
-The plots obtained from matplotlib and NCL were postprocessed in Inkscape v. 0.95. The software was used to arrange all panels and make fonts, labels and line colors consistent. The repsective *.svg files as well as all the "input" are listed in the directory figures
+The plots obtained from matplotlib and NCL were postprocessed in Inkscape v. 0.95. The software was used to arrange all panels and make fonts, labels and line colors consistent.
